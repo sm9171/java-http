@@ -21,7 +21,7 @@
 3. [Thread](study/src/test/java/thread)
 
 ## 미션 1단계 - TDD 실습
-- [ ] 요구사항1 - GET 요청
-- [ ] 요구사항2 - POST 요청
+- [x] 요구사항1 - GET 요청
+- [x] 요구사항2 - POST 요청
 - [ ] 요구사항3 - Query String 파싱
-- [ ] 요구사항4 - enum 적용(선택)
+- [x] 요구사항4 - enum 적용(선택)
