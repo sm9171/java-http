@@ -25,3 +25,9 @@
 - [x] 요구사항2 - POST 요청
 - [x] 요구사항3 - Query String 파싱
 - [x] 요구사항4 - enum 적용(선택)
+
+## 미션 2단계 - HTTP 서버 구현하기
+- [ ] 요구사항1 - GET /index.html 응답하기
+  - [ ] Http11ProcessorTest 테스트 클래스의 모든 테스트를 통과하면 된다.
+- [ ] 요구사항2 - CSS 지원하기
+- [ ] 요구사항3 - Query String 파싱
