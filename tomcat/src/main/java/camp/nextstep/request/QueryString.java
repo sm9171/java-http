@@ -1,4 +1,4 @@
-package camp.nextstep;
+package camp.nextstep.request;
 
 public class QueryString {
     private final String key;

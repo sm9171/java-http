@@ -1,4 +1,6 @@
-package camp.nextstep;
+package camp.nextstep.request;
+
+import camp.nextstep.HttpMethod;
 
 public class RequestLineParser {
     private final static String REQUEST_LINE_DELIMITER = " ";

@@ -1,4 +1,6 @@
-package camp.nextstep;
+package camp.nextstep.request;
+
+import camp.nextstep.HttpMethod;
 
 public class RequestLine {
     private final HttpMethod method;

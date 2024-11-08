@@ -1,4 +1,4 @@
-package camp.nextstep;
+package camp.nextstep.request;
 
 import java.util.List;
 

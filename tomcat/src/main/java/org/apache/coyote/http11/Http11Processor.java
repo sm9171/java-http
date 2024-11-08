@@ -1,11 +1,15 @@
 package org.apache.coyote.http11;
 
+import camp.nextstep.request.RequestLine;
+import camp.nextstep.request.RequestLineParser;
 import camp.nextstep.exception.UncheckedServletException;
 import org.apache.coyote.Processor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.net.Socket;
 
 public class Http11Processor implements Runnable, Processor {
@@ -27,7 +31,15 @@ public class Http11Processor implements Runnable, Processor {
     @Override
     public void process(final Socket connection) {
         try (final var inputStream = connection.getInputStream();
-             final var outputStream = connection.getOutputStream()) {
+             final var outputStream = connection.getOutputStream();
+             final BufferedReader br = new BufferedReader(new InputStreamReader(inputStream))) {
+
+            if (br.readLine() == null) {
+                throw new IllegalArgumentException("요청값이 빈값입니다.");
+            }
+
+            RequestLine requestLine = RequestLineParser.parse(br.readLine());
+
 
             final var responseBody = "Hello world!";
 
