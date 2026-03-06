@@ -1,0 +1,102 @@
+name: Claude Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  claude-review:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Get changed files
+        id: changed-files
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | tr '\n' ' ')
+          echo "files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+          echo "Changed files: $CHANGED_FILES"
+
+      - name: Install Claude Code CLI
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/anthropics/claude-code/main/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Authenticate Claude Code
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          # OAuth 토큰으로 인증
+          echo "$CLAUDE_CODE_OAUTH_TOKEN" | claude login --token
+
+      - name: Run Claude Code Review
+        id: review
+        env:
+          CHANGED_FILES: ${{ steps.changed-files.outputs.files }}
+        run: |
+          # 리뷰 결과를 파일로 저장
+          REVIEW_OUTPUT=$(mktemp)
+
+          # 변경된 파일들에 대해 코드 리뷰 요청
+          if [ -n "$CHANGED_FILES" ]; then
+            echo "Requesting review for: $CHANGED_FILES"
+
+            # Claude Code CLI를 사용한 리뷰 (interactive mode 비활성화)
+            cat << 'EOF' | claude --non-interactive > "$REVIEW_OUTPUT" 2>&1
+          /code-review
+
+          Please review the following changed files in this PR:
+          $CHANGED_FILES
+
+          Focus on:
+          1. Code quality and best practices
+          2. Potential bugs or issues
+          3. Security concerns
+          4. Performance implications
+          5. Maintainability
+          EOF
+
+            # 출력 저장
+            cat "$REVIEW_OUTPUT"
+            echo "review_file=$REVIEW_OUTPUT" >> $GITHUB_OUTPUT
+          else
+            echo "No files changed" > "$REVIEW_OUTPUT"
+            echo "review_file=$REVIEW_OUTPUT" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Post review comment
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          REVIEW_FILE="${{ steps.review.outputs.review_file }}"
+
+          if [ -f "$REVIEW_FILE" ]; then
+            # 리뷰 결과를 PR 코멘트로 작성
+            gh pr comment $PR_NUMBER --body-file "$REVIEW_FILE" \
+              --repo ${{ github.repository }} || \
+            gh pr comment $PR_NUMBER --body "## 🤖 Claude Code Review
+
+$(cat $REVIEW_FILE)
+
+---
+*Automated review by Claude Code*" --repo ${{ github.repository }}
+          fi
+
+      - name: Cleanup
+        if: always()
+        run: |
+          # 임시 파일 정리
+          REVIEW_FILE="${{ steps.review.outputs.review_file }}"
+          [ -f "$REVIEW_FILE" ] && rm -f "$REVIEW_FILE" || true
