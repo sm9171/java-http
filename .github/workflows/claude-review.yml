@@ -22,10 +22,134 @@ jobs:
       - name: Get changed files
         id: changed-files
         run: |
+          CHANGED_FILES_FILE=$(mktemp)
           git fetch origin ${{ github.base_ref }}
-          CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | tr '\n' ' ')
+          git diff --name-only origin/${{ github.base_ref }}...HEAD > "$CHANGED_FILES_FILE"
+          CHANGED_FILES=$(tr '\n' ' ' < "$CHANGED_FILES_FILE")
           echo "files=$CHANGED_FILES" >> $GITHUB_OUTPUT
+          echo "file=$CHANGED_FILES_FILE" >> $GITHUB_OUTPUT
           echo "Changed files: $CHANGED_FILES"
+
+      - name: Collect mission requirements
+        id: mission-requirements
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          MISSION_FILE=$(mktemp)
+          RESOLVED_MISSION_FILE=""
+          MISSION_SOURCE="none"
+          MISSION_DOC_FROM_PR=""
+          MISSION_DOC_INVALID="false"
+
+          if [ -n "$PR_BODY" ]; then
+            MISSION_DOC_FROM_PR=$(printf '%s\n' "$PR_BODY" | sed -n 's/^Mission-Doc:[[:space:]]*//p' | head -n 1 | tr -d '\r' | sed 's/[[:space:]]*$//')
+          fi
+
+          if [ -n "$MISSION_DOC_FROM_PR" ]; then
+            if [ -f "$MISSION_DOC_FROM_PR" ]; then
+              RESOLVED_MISSION_FILE="$MISSION_DOC_FROM_PR"
+              MISSION_SOURCE="pr-body"
+            else
+              MISSION_DOC_INVALID="true"
+            fi
+          elif [ -f docs/missions/current.md ]; then
+            RESOLVED_MISSION_FILE="docs/missions/current.md"
+            MISSION_SOURCE="current-md"
+          else
+            shopt -s nullglob
+            mission_docs=(docs/missions/*.md)
+            filtered_docs=()
+            for file in "${mission_docs[@]}"; do
+              if [ "$file" != "docs/missions/README.md" ] && [ "$file" != "docs/missions/current.md" ]; then
+                filtered_docs+=("$file")
+              fi
+            done
+
+            if [ ${#filtered_docs[@]} -eq 1 ]; then
+              RESOLVED_MISSION_FILE="${filtered_docs[0]}"
+              MISSION_SOURCE="single-doc"
+            fi
+          fi
+
+          if [ -n "$RESOLVED_MISSION_FILE" ]; then
+            {
+              echo "Active mission requirements:"
+              echo
+              echo "Source: $MISSION_SOURCE"
+              echo "Path: $RESOLVED_MISSION_FILE"
+              echo
+              cat "$RESOLVED_MISSION_FILE"
+            } > "$MISSION_FILE"
+            echo "found=true" >> $GITHUB_OUTPUT
+            echo "path=$RESOLVED_MISSION_FILE" >> $GITHUB_OUTPUT
+            echo "source=$MISSION_SOURCE" >> $GITHUB_OUTPUT
+          else
+            {
+              if [ "$MISSION_DOC_INVALID" = "true" ]; then
+                echo "The PR body declared an invalid mission document path."
+                echo
+                echo "Mission-Doc: $MISSION_DOC_FROM_PR"
+                echo "Mission-Doc-Status: invalid"
+              else
+                echo "No active mission requirement document could be resolved."
+                echo "Mission-Doc-Status: unresolved"
+              fi
+              echo
+              echo "Resolution order:"
+              echo "1. PR body line: Mission-Doc: <path>"
+              echo "2. docs/missions/current.md"
+              echo "3. Exactly one mission doc under docs/missions/*.md, excluding README.md and current.md"
+            } > "$MISSION_FILE"
+            echo "found=false" >> $GITHUB_OUTPUT
+            echo "path=" >> $GITHUB_OUTPUT
+            echo "source=none" >> $GITHUB_OUTPUT
+          fi
+
+          echo "file=$MISSION_FILE" >> $GITHUB_OUTPUT
+
+      - name: Collect PR review metadata
+        id: review-metadata
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          METADATA_FILE=$(mktemp)
+
+          extract_field() {
+            local field_name="$1"
+            printf '%s\n' "$PR_BODY" | sed -n "s/^${field_name}:[[:space:]]*//p" | head -n 1 | tr -d '\r' | sed 's/[[:space:]]*$//'
+          }
+
+          MISSION_STEP=$(extract_field "Mission-Step")
+          REQUIREMENT_COVERAGE=$(extract_field "Requirement-Coverage")
+          TESTS=$(extract_field "Tests")
+          REVIEW_FOCUS=$(extract_field "Review-Focus")
+          OUT_OF_SCOPE=$(extract_field "Out-of-Scope")
+
+          {
+            if [ -n "$MISSION_STEP" ]; then
+              echo "Mission-Step: $MISSION_STEP"
+            fi
+            if [ -n "$REQUIREMENT_COVERAGE" ]; then
+              echo "Requirement-Coverage: $REQUIREMENT_COVERAGE"
+            fi
+            if [ -n "$TESTS" ]; then
+              echo "Tests: $TESTS"
+            fi
+            if [ -n "$REVIEW_FOCUS" ]; then
+              echo "Review-Focus: $REVIEW_FOCUS"
+            fi
+            if [ -n "$OUT_OF_SCOPE" ]; then
+              echo "Out-of-Scope: $OUT_OF_SCOPE"
+            fi
+          } > "$METADATA_FILE"
+
+          if [ -s "$METADATA_FILE" ]; then
+            echo "found=true" >> $GITHUB_OUTPUT
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+          fi
+
+          echo "file=$METADATA_FILE" >> $GITHUB_OUTPUT
 
       - name: Install Claude Code CLI
         run: |
@@ -43,30 +167,77 @@ jobs:
         id: review
         env:
           CHANGED_FILES: ${{ steps.changed-files.outputs.files }}
+          CHANGED_FILES_FILE: ${{ steps.changed-files.outputs.file }}
+          MISSION_REQUIREMENTS_FILE: ${{ steps.mission-requirements.outputs.file }}
+          MISSION_REQUIREMENTS_FOUND: ${{ steps.mission-requirements.outputs.found }}
+          MISSION_REQUIREMENTS_PATH: ${{ steps.mission-requirements.outputs.path }}
+          REVIEW_METADATA_FILE: ${{ steps.review-metadata.outputs.file }}
+          REVIEW_METADATA_FOUND: ${{ steps.review-metadata.outputs.found }}
         run: |
-          # 리뷰 결과를 파일로 저장
           REVIEW_OUTPUT=$(mktemp)
+          REVIEW_ERROR=$(mktemp)
+          PROMPT_FILE=$(mktemp)
+          trap 'rm -f "$PROMPT_FILE" "$REVIEW_ERROR"' EXIT
 
-          # 변경된 파일들에 대해 코드 리뷰 요청
           if [ -n "$CHANGED_FILES" ]; then
             echo "Requesting review for: $CHANGED_FILES"
 
-            # Claude Code CLI를 사용한 리뷰 (interactive mode 비활성화)
-            cat << 'EOF' | claude --non-interactive > "$REVIEW_OUTPUT" 2>&1
-          /code-review
+            {
+              echo "/code-review"
+              echo
+              echo "Please review the following changed files in this PR:"
+              cat "$CHANGED_FILES_FILE"
+              echo
 
-          Please review the following changed files in this PR:
-          $CHANGED_FILES
+              if [ "$MISSION_REQUIREMENTS_FOUND" = "true" ]; then
+                echo "Review against these mission requirements as the primary rubric:"
+                echo "Active mission document: $MISSION_REQUIREMENTS_PATH"
+                echo
+                cat "$MISSION_REQUIREMENTS_FILE"
+                echo
+              else
+                echo "Mission document resolution details:"
+                cat "$MISSION_REQUIREMENTS_FILE"
+                echo
+                echo "Look for a PR body line like: Mission-Doc: docs/missions/tomcat-implementation.md"
+                echo
+              fi
 
-          Focus on:
-          1. Code quality and best practices
-          2. Potential bugs or issues
-          3. Security concerns
-          4. Performance implications
-          5. Maintainability
-          EOF
+              if [ "$REVIEW_METADATA_FOUND" = "true" ]; then
+                echo "PR review metadata:"
+                cat "$REVIEW_METADATA_FILE"
+                echo
+              else
+                echo "No additional PR review metadata was provided."
+                echo "Recommended PR body fields: Mission-Step, Requirement-Coverage, Tests, Review-Focus, Out-of-Scope"
+                echo
+              fi
 
-            # 출력 저장
+              echo "Treat PR metadata as claims to verify, not facts to trust. Compare Mission-Step, Requirement-Coverage, Tests, Review-Focus, and Out-of-Scope against the actual diff and the mission document."
+              echo
+
+              echo "Focus on:"
+              echo "1. Mission requirement coverage and omissions"
+              echo "2. Test completeness for the current mission step"
+              echo "3. Code quality and maintainability"
+              echo "4. Potential bugs or HTTP behavior mismatches"
+              echo "5. Over-engineering or premature abstraction beyond the current step"
+            } > "$PROMPT_FILE"
+
+            if claude --non-interactive < "$PROMPT_FILE" > "$REVIEW_OUTPUT" 2> "$REVIEW_ERROR"; then
+              :
+            else
+              {
+                echo "Claude review failed."
+                echo
+                echo "stderr:"
+                sed -n '1,120p' "$REVIEW_ERROR"
+              } > "$REVIEW_OUTPUT"
+              cat "$REVIEW_OUTPUT"
+              echo "review_file=$REVIEW_OUTPUT" >> $GITHUB_OUTPUT
+              exit 1
+            fi
+
             cat "$REVIEW_OUTPUT"
             echo "review_file=$REVIEW_OUTPUT" >> $GITHUB_OUTPUT
           else
@@ -75,7 +246,7 @@ jobs:
           fi
 
       - name: Post review comment
-        if: success()
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -83,20 +254,31 @@ jobs:
           REVIEW_FILE="${{ steps.review.outputs.review_file }}"
 
           if [ -f "$REVIEW_FILE" ]; then
-            # 리뷰 결과를 PR 코멘트로 작성
             gh pr comment $PR_NUMBER --body-file "$REVIEW_FILE" \
               --repo ${{ github.repository }} || \
-            gh pr comment $PR_NUMBER --body "## 🤖 Claude Code Review
-
-$(cat $REVIEW_FILE)
-
----
-*Automated review by Claude Code*" --repo ${{ github.repository }}
+            {
+              FALLBACK_BODY=$(mktemp)
+              {
+                echo "## Claude Code Review"
+                echo
+                cat "$REVIEW_FILE"
+                echo
+                echo "---"
+                echo "Automated review by Claude Code"
+              } > "$FALLBACK_BODY"
+              gh pr comment $PR_NUMBER --body-file "$FALLBACK_BODY" --repo ${{ github.repository }}
+              rm -f "$FALLBACK_BODY"
+            }
           fi
 
       - name: Cleanup
         if: always()
         run: |
-          # 임시 파일 정리
           REVIEW_FILE="${{ steps.review.outputs.review_file }}"
+          CHANGED_FILES_FILE="${{ steps.changed-files.outputs.file }}"
+          MISSION_REQUIREMENTS_FILE="${{ steps.mission-requirements.outputs.file }}"
+          REVIEW_METADATA_FILE="${{ steps.review-metadata.outputs.file }}"
           [ -f "$REVIEW_FILE" ] && rm -f "$REVIEW_FILE" || true
+          [ -f "$CHANGED_FILES_FILE" ] && rm -f "$CHANGED_FILES_FILE" || true
+          [ -f "$MISSION_REQUIREMENTS_FILE" ] && rm -f "$MISSION_REQUIREMENTS_FILE" || true
+          [ -f "$REVIEW_METADATA_FILE" ] && rm -f "$REVIEW_METADATA_FILE" || true
