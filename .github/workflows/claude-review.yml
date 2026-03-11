@@ -170,7 +170,7 @@ jobs:
             echo "Requesting review for: $CHANGED_FILES"
 
             {
-              echo "/review"
+              echo "Review this pull request against the changed files, mission requirements, and PR metadata below."
               echo
               echo "Please review the following changed files in this PR:"
               cat "$CHANGED_FILES_FILE"
@@ -228,6 +228,7 @@ jobs:
           prompt: ${{ steps.review-prompt.outputs.prompt }}
           use_sticky_comment: "true"
           display_report: "false"
+          show_full_output: "true"
 
       - name: Cleanup
         if: always()
