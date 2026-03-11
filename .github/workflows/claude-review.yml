@@ -203,6 +203,8 @@ jobs:
 
               echo "Treat PR metadata as claims to verify, not facts to trust. Compare Mission-Step, Requirement-Coverage, Tests, Review-Focus, and Out-of-Scope against the actual diff and the mission document."
               echo
+              echo "Post the final review as a sticky PR comment."
+              echo
 
               echo "Focus on:"
               echo "1. Mission requirement coverage and omissions"
@@ -228,7 +230,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: ${{ steps.review-prompt.outputs.prompt }}
           use_sticky_comment: "true"
-          display_report: "false"
+          display_report: "true"
           show_full_output: "true"
 
       - name: Cleanup
