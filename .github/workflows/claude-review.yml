@@ -229,6 +229,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: ${{ steps.review-prompt.outputs.prompt }}
+          track_progress: "true"
           use_sticky_comment: "true"
           display_report: "true"
           show_full_output: "true"
