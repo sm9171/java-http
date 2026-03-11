@@ -153,8 +153,29 @@ jobs:
 
       - name: Install Claude Code CLI
         run: |
-          curl -fsSL https://raw.githubusercontent.com/anthropics/claude-code/main/install.sh | sh
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          set -o pipefail
+          curl -fsSL https://claude.ai/install.sh | bash
+
+          CLAUDE_PATH=$(command -v claude || true)
+          if [ -z "$CLAUDE_PATH" ]; then
+            for candidate in "$HOME/.local/bin/claude" "$HOME/bin/claude" "/usr/local/bin/claude"; do
+              if [ -x "$candidate" ]; then
+                CLAUDE_PATH="$candidate"
+                break
+              fi
+            done
+          fi
+
+          if [ -z "$CLAUDE_PATH" ]; then
+            echo "Claude CLI was not found after installation."
+            exit 1
+          fi
+
+          CLAUDE_BIN_DIR=$(dirname "$CLAUDE_PATH")
+          echo "$CLAUDE_BIN_DIR" >> $GITHUB_PATH
+          export PATH="$CLAUDE_BIN_DIR:$PATH"
+          which claude
+          claude --version
 
       - name: Authenticate Claude Code
         env:
