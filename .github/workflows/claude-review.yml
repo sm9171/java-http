@@ -177,16 +177,10 @@ jobs:
           which claude
           claude --version
 
-      - name: Authenticate Claude Code
-        env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-        run: |
-          # OAuth 토큰으로 인증
-          echo "$CLAUDE_CODE_OAUTH_TOKEN" | claude login --token
-
       - name: Run Claude Code Review
         id: review
         env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           CHANGED_FILES: ${{ steps.changed-files.outputs.files }}
           CHANGED_FILES_FILE: ${{ steps.changed-files.outputs.file }}
           MISSION_REQUIREMENTS_FILE: ${{ steps.mission-requirements.outputs.file }}
