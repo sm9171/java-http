@@ -151,36 +151,9 @@ jobs:
 
           echo "file=$METADATA_FILE" >> $GITHUB_OUTPUT
 
-      - name: Install Claude Code CLI
-        run: |
-          set -o pipefail
-          curl -fsSL https://claude.ai/install.sh | bash
-
-          CLAUDE_PATH=$(command -v claude || true)
-          if [ -z "$CLAUDE_PATH" ]; then
-            for candidate in "$HOME/.local/bin/claude" "$HOME/bin/claude" "/usr/local/bin/claude"; do
-              if [ -x "$candidate" ]; then
-                CLAUDE_PATH="$candidate"
-                break
-              fi
-            done
-          fi
-
-          if [ -z "$CLAUDE_PATH" ]; then
-            echo "Claude CLI was not found after installation."
-            exit 1
-          fi
-
-          CLAUDE_BIN_DIR=$(dirname "$CLAUDE_PATH")
-          echo "$CLAUDE_BIN_DIR" >> $GITHUB_PATH
-          export PATH="$CLAUDE_BIN_DIR:$PATH"
-          which claude
-          claude --version
-
-      - name: Run Claude Code Review
-        id: review
+      - name: Build review prompt
+        id: review-prompt
         env:
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           CHANGED_FILES: ${{ steps.changed-files.outputs.files }}
           CHANGED_FILES_FILE: ${{ steps.changed-files.outputs.file }}
           MISSION_REQUIREMENTS_FILE: ${{ steps.mission-requirements.outputs.file }}
@@ -189,10 +162,8 @@ jobs:
           REVIEW_METADATA_FILE: ${{ steps.review-metadata.outputs.file }}
           REVIEW_METADATA_FOUND: ${{ steps.review-metadata.outputs.found }}
         run: |
-          REVIEW_OUTPUT=$(mktemp)
-          REVIEW_ERROR=$(mktemp)
           PROMPT_FILE=$(mktemp)
-          trap 'rm -f "$PROMPT_FILE" "$REVIEW_ERROR"' EXIT
+          trap 'rm -f "$PROMPT_FILE"' EXIT
 
           if [ -n "$CHANGED_FILES" ]; then
             echo "Requesting review for: $CHANGED_FILES"
@@ -238,62 +209,32 @@ jobs:
               echo "4. Potential bugs or HTTP behavior mismatches"
               echo "5. Over-engineering or premature abstraction beyond the current step"
             } > "$PROMPT_FILE"
-
-            if claude --non-interactive < "$PROMPT_FILE" > "$REVIEW_OUTPUT" 2> "$REVIEW_ERROR"; then
-              :
-            else
-              {
-                echo "Claude review failed."
-                echo
-                echo "stderr:"
-                sed -n '1,120p' "$REVIEW_ERROR"
-              } > "$REVIEW_OUTPUT"
-              cat "$REVIEW_OUTPUT"
-              echo "review_file=$REVIEW_OUTPUT" >> $GITHUB_OUTPUT
-              exit 1
-            fi
-
-            cat "$REVIEW_OUTPUT"
-            echo "review_file=$REVIEW_OUTPUT" >> $GITHUB_OUTPUT
           else
-            echo "No files changed" > "$REVIEW_OUTPUT"
-            echo "review_file=$REVIEW_OUTPUT" >> $GITHUB_OUTPUT
+            echo "No files changed" > "$PROMPT_FILE"
           fi
 
-      - name: Post review comment
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          REVIEW_FILE="${{ steps.review.outputs.review_file }}"
+          {
+            echo "prompt<<__CLAUDE_REVIEW_PROMPT__"
+            cat "$PROMPT_FILE"
+            echo "__CLAUDE_REVIEW_PROMPT__"
+          } >> "$GITHUB_OUTPUT"
 
-          if [ -f "$REVIEW_FILE" ]; then
-            gh pr comment $PR_NUMBER --body-file "$REVIEW_FILE" \
-              --repo ${{ github.repository }} || \
-            {
-              FALLBACK_BODY=$(mktemp)
-              {
-                echo "## Claude Code Review"
-                echo
-                cat "$REVIEW_FILE"
-                echo
-                echo "---"
-                echo "Automated review by Claude Code"
-              } > "$FALLBACK_BODY"
-              gh pr comment $PR_NUMBER --body-file "$FALLBACK_BODY" --repo ${{ github.repository }}
-              rm -f "$FALLBACK_BODY"
-            }
-          fi
+      - name: Run Claude Code Review
+        id: review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          prompt: ${{ steps.review-prompt.outputs.prompt }}
+          use_sticky_comment: "true"
+          display_report: "false"
 
       - name: Cleanup
         if: always()
         run: |
-          REVIEW_FILE="${{ steps.review.outputs.review_file }}"
           CHANGED_FILES_FILE="${{ steps.changed-files.outputs.file }}"
           MISSION_REQUIREMENTS_FILE="${{ steps.mission-requirements.outputs.file }}"
           REVIEW_METADATA_FILE="${{ steps.review-metadata.outputs.file }}"
-          [ -f "$REVIEW_FILE" ] && rm -f "$REVIEW_FILE" || true
           [ -f "$CHANGED_FILES_FILE" ] && rm -f "$CHANGED_FILES_FILE" || true
           [ -f "$MISSION_REQUIREMENTS_FILE" ] && rm -f "$MISSION_REQUIREMENTS_FILE" || true
           [ -f "$REVIEW_METADATA_FILE" ] && rm -f "$REVIEW_METADATA_FILE" || true
