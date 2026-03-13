@@ -1,4 +1,7 @@
-package camp.nextstep;
+package camp.nextstep.request;
+
+import camp.nextstep.HttpMethod;
+import camp.nextstep.QueryString;
 
 public class RequestLine {
     private HttpMethod httpMethod;
@@ -7,7 +10,23 @@ public class RequestLine {
     private String version;
     private QueryString queryString;
 
-    public RequestLine(String url) {
+    private RequestLine(HttpMethod httpMethod, String path, String protocol, String version, QueryString queryString) {
+        this.httpMethod = httpMethod;
+        this.path = path;
+        this.protocol = protocol;
+        this.version = version;
+        this.queryString = queryString;
+    }
+
+
+
+    public static RequestLine create(String url) {
+        HttpMethod httpMethod;
+        String path;
+        String protocol;
+        String version;
+        QueryString queryString = null;
+
         if (url == null || url.isBlank()) {
             throw new IllegalArgumentException("Request line must not be null or blank");
         }
@@ -34,6 +53,7 @@ public class RequestLine {
         }
         protocol = splitProtocolAndVersion[0];
         version = splitProtocolAndVersion[1];
+        return new RequestLine(httpMethod, path, protocol, version, queryString);
     }
 
     public HttpMethod getHttpMethod() {
