@@ -16,6 +16,10 @@ public class StaticResourceResolver {
             return new StaticResource("Hello world!".getBytes(StandardCharsets.UTF_8), contentTypeResolver.resolve("/index.html"));
         }
 
+        if (!requestPath.substring(requestPath.lastIndexOf('/') + 1).contains(".")) {
+            requestPath = requestPath + ".html";
+        }
+
         var resource = getClass().getClassLoader().getResource("static" + requestPath);
         Path path = Path.of(resource.toURI());
         byte[] body = Files.readAllBytes(path);
